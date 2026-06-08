@@ -12,6 +12,7 @@ const SOURCES = [
       ) +
       "&hl=en-US&gl=US&ceid=US:en",
     series: "FROM",
+    required: ["from", "mgm"],
   },
   {
     label: "Google News",
@@ -23,6 +24,7 @@ const SOURCES = [
       ) +
       "&hl=en-US&gl=US&ceid=US:en",
     series: "FROM",
+    required: ["from", "mgm"],
   },
   {
     label: "Google News - Trailer",
@@ -32,6 +34,7 @@ const SOURCES = [
       encodeURIComponent('"Silo season 3" trailer OR "Silo season 3" teaser OR "Silo Apple TV" teaser when:1d') +
       "&hl=en-US&gl=US&ceid=US:en",
     series: "Silo temporada 3",
+    required: ["silo", "apple tv"],
   },
   {
     label: "Google News",
@@ -41,6 +44,7 @@ const SOURCES = [
       encodeURIComponent('"Silo season 3" OR "Silo Apple TV" when:1d') +
       "&hl=en-US&gl=US&ceid=US:en",
     series: "Silo temporada 3",
+    required: ["silo", "apple tv"],
   },
   {
     label: "Google News - Trailer",
@@ -50,6 +54,7 @@ const SOURCES = [
       encodeURIComponent('"House of the Dragon season 3" trailer OR "House of the Dragon season 3" teaser OR "HBO" "House of the Dragon" "trailer" when:1d') +
       "&hl=en-US&gl=US&ceid=US:en",
     series: "A Casa do Dragao temporada 3",
+    required: ["house of the dragon", "targaryen", "hbo"],
   },
   {
     label: "Google News",
@@ -61,24 +66,28 @@ const SOURCES = [
       ) +
       "&hl=en-US&gl=US&ceid=US:en",
     series: "A Casa do Dragao temporada 3",
+    required: ["house of the dragon", "knight of the seven kingdoms", "hbo"],
   },
   {
     label: "Reddit FromSeries",
     kind: "rss",
     url: "https://www.reddit.com/r/FromSeries/new/.rss",
     series: "FROM",
+    required: ["from", "tabitha", "victor", "jade", "boyd", "ethan", "julie", "town"],
   },
   {
     label: "Reddit SiloSeries",
     kind: "rss",
     url: "https://www.reddit.com/r/SiloSeries/new/.rss",
     series: "Silo temporada 3",
+    required: ["silo", "apple", "juliette"],
   },
   {
     label: "Reddit HOTD",
     kind: "rss",
     url: "https://www.reddit.com/r/HouseOfTheDragon/new/.rss",
     series: "A Casa do Dragao temporada 3",
+    required: ["dragon", "targaryen", "rhaenyra", "daemon", "alicent", "westeros"],
   },
 ];
 
@@ -138,6 +147,15 @@ function stripTags(value) {
   return decodeHtml(value).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function cleanSummaryText(value) {
+  return String(value || "")
+    .replace(/\[image not found\]/gi, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+-\s+(MSN|IGN|Collider|ScreenRant|Variety|Deadline|The Hollywood Reporter|The Movie Blog|AOL\.com|Decider).*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function getTag(item, tag) {
   const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
   return match ? decodeHtml(match[1]).trim() : "";
@@ -172,9 +190,9 @@ function parseRss(xml, source) {
       link = href ? decodeHtml(href[1]) : "";
     }
     const pubDate = stripTags(getTag(item, "pubDate")) || stripTags(getTag(item, "updated")) || stripTags(getTag(item, "published"));
-    const description = stripTags(getTag(item, "description")) || stripTags(getTag(item, "content")) || stripTags(getTag(item, "summary"));
+    const description = cleanSummaryText(stripTags(getTag(item, "description")) || stripTags(getTag(item, "content")) || stripTags(getTag(item, "summary")));
     const id = stripTags(getTag(item, "guid")) || stripTags(getTag(item, "id")) || link || `${source.series}:${title}`;
-    return { id, title, link, pubDate, description, source: source.label, series: source.series, image: getImageFromXml(item) || fallbackImage(source.series) };
+    return { id, title, link, pubDate, description, source: source.label, series: source.series, image: getImageFromXml(item) || fallbackImage(source.series), required: source.required || [] };
   });
 }
 
@@ -186,10 +204,11 @@ function parseReddit(json, source) {
       title: data.title || "",
       link: data.permalink ? `https://www.reddit.com${data.permalink}` : data.url,
       pubDate: data.created_utc ? new Date(data.created_utc * 1000).toUTCString() : "",
-      description: data.selftext || "",
+      description: cleanSummaryText(data.selftext || ""),
       source: source.label,
       series: source.series,
       image: data.thumbnail && /^https?:\/\//i.test(data.thumbnail) ? data.thumbnail : fallbackImage(source.series),
+      required: source.required || [],
       score: data.score || 0,
       comments: data.num_comments || 0,
     };
@@ -216,6 +235,17 @@ function isRecent(item) {
 
   const ageMinutes = (Date.now() - publishedAt) / 60000;
   return ageMinutes >= 0 && ageMinutes <= maxAgeMinutes;
+}
+
+function isRelevant(item) {
+  const text = `${item.title} ${item.description} ${item.series}`.toLowerCase();
+  const required = item.required || [];
+  if (required.length && !required.some((term) => text.includes(term))) return false;
+  if (/among us|hell mode|anime|cricket|sports|stock market|horoscope|weather/i.test(text)) return false;
+  if (item.series === "Silo temporada 3" && !/\bsilo\b|apple tv|juliette/i.test(text)) return false;
+  if (item.series === "A Casa do Dragao temporada 3" && !/house of the dragon|targaryen|rhaenyra|daemon|alicent|westeros|hbo/i.test(text)) return false;
+  if (item.series === "FROM" && !/\bfrom\b|mgm|tabitha|victor|jade|boyd|ethan|julie/i.test(text)) return false;
+  return true;
 }
 
 function loadState() {
@@ -276,8 +306,27 @@ function buildAlert(item) {
 }
 
 function translateTitleToPt(title) {
-  let translated = title;
+  let translated = cleanSummaryText(title);
   const replacements = [
+    [/\bam i the only one that thinks\b/gi, "sou o unico que acha que"],
+    [/\bthe only one\b/gi, "o unico"],
+    [/\bbecoming irritating\b/gi, "ficando irritantes"],
+    [/\birritating\b/gi, "irritante"],
+    [/\bdrops on\b/gi, "estreia em"],
+    [/\bfull trailer\b/gi, "trailer completo"],
+    [/\breveals\b/gi, "revela"],
+    [/\bpremiere date\b/gi, "data de estreia"],
+    [/\bpremiere\b/gi, "estreia"],
+    [/\bin episode\b/gi, "no episodio"],
+    [/\btells\b/gi, "diz para"],
+    [/\byells at him saying\b/gi, "grita com ele dizendo"],
+    [/\bwhat is wrong with you\b/gi, "o que tem de errado com voce"],
+    [/\bthis frustrates me\b/gi, "isso incomoda muitos fas"],
+    [/\bwhy can't you just listen to him\b/gi, "por que nao simplesmente ouvir ele"],
+    [/\bto teach me\b/gi, "me ensinar"],
+    [/\bto survive\b/gi, "a sobreviver"],
+    [/\bwhen im alone\b/gi, "quando eu estiver sozinho"],
+    [/\byou'?re not gonna be here alone\b/gi, "voce nao vai ficar aqui sozinho"],
     [/\bfinal trailer\b/gi, "trailer final"],
     [/\btrailer\b/gi, "trailer"],
     [/\bteaser\b/gi, "teaser"],
@@ -339,7 +388,7 @@ function translateTitleToPt(title) {
 }
 
 function summarizeItem(item) {
-  const text = stripTags(item.description || "").replace(/\s+/g, " ").trim();
+  const text = cleanSummaryText(stripTags(item.description || ""));
   if (text && text.length > 40) {
     return translateTitleToPt(text).slice(0, 420);
   }
@@ -414,6 +463,7 @@ async function main() {
   const candidates = allItems
     .map((item) => ({ ...item, priorityScore: scoreItem(item) }))
     .filter((item) => item.priorityScore >= 3)
+    .filter(isRelevant)
     .filter(isRecent)
     .filter((item) => !state.seen[item.id])
     .sort((a, b) => b.priorityScore - a.priorityScore)
