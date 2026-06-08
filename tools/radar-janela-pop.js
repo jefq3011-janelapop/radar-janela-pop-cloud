@@ -283,7 +283,7 @@ function buildAlert(item) {
     : scoreItem(item) >= 3
       ? "MEDIA"
       : "BAIXA";
-  const translatedTitle = translateTitleToPt(title);
+  const translatedTitle = buildPtTitle(item, title);
   const summary = summarizeItem(item);
   const videoIdea = buildVideoIdea(item, translatedTitle);
   const hook = buildHook(item, translatedTitle);
@@ -303,6 +303,20 @@ function buildAlert(item) {
     "",
     item.link,
   ].filter(Boolean).join("\n");
+}
+
+function buildPtTitle(item, title) {
+  const text = `${title} ${item.description}`.toLowerCase();
+  if (item.series === "FROM") {
+    if (/memory|memoria|children|sacrifice|fracture/.test(text)) return "FROM: teoria da memoria liga as criancas sacrificadas aos misterios da cidade";
+    if (/experiment|scientific|simulation|coma|hospital|reality/.test(text)) return "FROM: fas levantam teoria de que a cidade pode ser um experimento cientifico";
+    if (/miy|man in yellow|yellow|fear|boy in white|hope|victor/.test(text)) return "FROM: teoria diz que o Homem de Amarelo pode se alimentar do medo dos moradores";
+    if (/tabitha|julie|victor|ethan/.test(text)) return "FROM: debate sobre Tabitha, Julie, Victor e Ethan cresce entre os fas";
+    if (/jade/.test(text)) return "FROM: nova teoria coloca Jade no centro do misterio";
+    if (/boyd/.test(text)) return "FROM: nova discussao coloca Boyd no centro dos proximos acontecimentos";
+    return translateTitleToPt(title);
+  }
+  return translateTitleToPt(title);
 }
 
 function translateTitleToPt(title) {
@@ -388,9 +402,22 @@ function translateTitleToPt(title) {
 }
 
 function summarizeItem(item) {
-  const text = cleanSummaryText(stripTags(item.description || ""));
-  if (text && text.length > 40) {
-    return translateTitleToPt(text).slice(0, 420);
+  const text = `${item.title} ${cleanSummaryText(stripTags(item.description || ""))}`.toLowerCase();
+
+  if (item.series === "FROM") {
+    if (/memory|memoria|children|sacrifice|fracture/.test(text)) {
+      return "Uma teoria recente defende que FROM pode girar em torno de uma memoria fragmentada criada pelo sacrificio das criancas. A ideia tenta conectar medo, lembrancas, ciclos e a propria origem de Fromville.";
+    }
+    if (/experiment|scientific|simulation|coma|hospital|reality/.test(text)) {
+      return "Fas voltaram a discutir se Fromville pode ser algum tipo de experimento, simulacao ou realidade ligada a coma/hospital. A teoria ganhou forca por causa de cenas recentes que misturam cidade e mundo real.";
+    }
+    if (/miy|man in yellow|yellow|fear|boy in white|hope|victor/.test(text)) {
+      return "A discussao sugere que o Homem de Amarelo talvez nao queira apenas matar, mas se alimentar do medo. O Menino de Branco poderia representar uma falsa esperanca que mantem os moradores presos no ciclo.";
+    }
+    if (/tabitha|julie|victor|ethan/.test(text)) {
+      return "A comunidade esta debatendo as atitudes de Tabitha e Julie diante dos avisos de Victor, principalmente sobre Ethan e a necessidade de preparar a crianca para sobreviver em Fromville.";
+    }
+    return "Teoria recente da comunidade internacional de FROM trouxe uma leitura nova sobre os misterios da cidade e pode render um video de debate para testar a opiniao do publico brasileiro.";
   }
 
   if (item.series === "FROM") {
