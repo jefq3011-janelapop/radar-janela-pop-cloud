@@ -102,6 +102,12 @@ const IMPORTANT_TERMS = [
 ];
 
 const STATE_FILE = path.join(__dirname, "..", "data", "radar-state.json");
+const IMAGE_BASE = "https://raw.githubusercontent.com/jefq3011-janelapop/portal-janela-pop/main/assets";
+const SERIES_IMAGES = {
+  "FROM": `${IMAGE_BASE}/from-serie.jpg`,
+  "Silo temporada 3": `${IMAGE_BASE}/banner-janela-pop.png`,
+  "A Casa do Dragao temporada 3": `${IMAGE_BASE}/house-of-the-dragon-s3.jpg`,
+};
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -137,6 +143,22 @@ function getTag(item, tag) {
   return match ? decodeHtml(match[1]).trim() : "";
 }
 
+function getImageFromXml(item) {
+  const media =
+    item.match(/<media:content[^>]+url=["']([^"']+)["']/i) ||
+    item.match(/<media:thumbnail[^>]+url=["']([^"']+)["']/i) ||
+    item.match(/<enclosure[^>]+url=["']([^"']+)["'][^>]+type=["']image\//i);
+  if (media) return decodeHtml(media[1]);
+
+  const html = decodeHtml(getTag(item, "description") || getTag(item, "summary") || getTag(item, "content") || "");
+  const image = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return image ? decodeHtml(image[1]) : "";
+}
+
+function fallbackImage(series) {
+  return SERIES_IMAGES[series] || `${IMAGE_BASE}/banner-janela-pop.png`;
+}
+
 function parseRss(xml, source) {
   const itemMatches = Array.from(xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)).map((match) => match[0]);
   const entryMatches = Array.from(xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)).map((match) => match[0]);
@@ -152,7 +174,7 @@ function parseRss(xml, source) {
     const pubDate = stripTags(getTag(item, "pubDate")) || stripTags(getTag(item, "updated")) || stripTags(getTag(item, "published"));
     const description = stripTags(getTag(item, "description")) || stripTags(getTag(item, "content")) || stripTags(getTag(item, "summary"));
     const id = stripTags(getTag(item, "guid")) || stripTags(getTag(item, "id")) || link || `${source.series}:${title}`;
-    return { id, title, link, pubDate, description, source: source.label, series: source.series };
+    return { id, title, link, pubDate, description, source: source.label, series: source.series, image: getImageFromXml(item) || fallbackImage(source.series) };
   });
 }
 
@@ -167,6 +189,7 @@ function parseReddit(json, source) {
       description: data.selftext || "",
       source: source.label,
       series: source.series,
+      image: data.thumbnail && /^https?:\/\//i.test(data.thumbnail) ? data.thumbnail : fallbackImage(source.series),
       score: data.score || 0,
       comments: data.num_comments || 0,
     };
@@ -231,14 +254,23 @@ function buildAlert(item) {
       ? "MEDIA"
       : "BAIXA";
   const translatedTitle = translateTitleToPt(title);
+  const summary = summarizeItem(item);
+  const videoIdea = buildVideoIdea(item, translatedTitle);
+  const hook = buildHook(item, translatedTitle);
 
   return [
-    `ALERTA JANELA POP - ${urgency}`,
-    `Serie: ${item.series}`,
+    `NOVIDADE PARA VIDEO - ${urgency}`,
+    `Tema: ${translatedTitle}`,
+    "",
+    `Serie/assunto: ${item.series}`,
     `Fonte: ${item.source}`,
-    `Novidade: ${translatedTitle}`,
-    translatedTitle === title ? "" : `Original: ${title}`,
-    `Ideia de video: explicar a novidade em portugues e puxar o impacto para o publico BR.`,
+    "",
+    `Resumo: ${summary}`,
+    "",
+    `Por que pode virar video: ${videoIdea}`,
+    "",
+    `Gancho sugerido: ${hook}`,
+    "",
     item.link,
   ].filter(Boolean).join("\n");
 }
@@ -280,6 +312,19 @@ function translateTitleToPt(title) {
     [/\bthings get interesting\b/gi, "as coisas ficam interessantes"],
     [/\bHouse of the Dragon\b/gi, "A Casa do Dragao"],
     [/\bFrom\b/g, "FROM"],
+    [/\bfans\b/gi, "fas"],
+    [/\bnew\b/gi, "novo"],
+    [/\bwhy\b/gi, "por que"],
+    [/\bhow\b/gi, "como"],
+    [/\bwill\b/gi, "vai"],
+    [/\bmay\b/gi, "pode"],
+    [/\bsecret\b/gi, "segredo"],
+    [/\bspoilers?\b/gi, "spoilers"],
+    [/\brecap\b/gi, "resumo"],
+    [/\bpreview\b/gi, "previa"],
+    [/\bposter\b/gi, "poster"],
+    [/\bimages?\b/gi, "imagem"],
+    [/\bphotos?\b/gi, "foto"],
   ];
 
   for (const [pattern, value] of replacements) {
@@ -293,7 +338,41 @@ function translateTitleToPt(title) {
     .trim();
 }
 
-async function sendTelegram(text) {
+function summarizeItem(item) {
+  const text = stripTags(item.description || "").replace(/\s+/g, " ").trim();
+  if (text && text.length > 40) {
+    return translateTitleToPt(text).slice(0, 420);
+  }
+
+  if (item.series === "FROM") {
+    return "A conversa envolve FROM e pode indicar teoria, novidade de episodio, trailer, imagem promocional ou debate recente da comunidade internacional.";
+  }
+  if (item.series === "Silo temporada 3") {
+    return "A novidade envolve Silo e pode render pauta sobre futuro da serie, producao, elenco, trailer ou expectativas para a terceira temporada.";
+  }
+  if (item.series === "A Casa do Dragao temporada 3") {
+    return "A novidade envolve A Casa do Dragao e pode render pauta sobre a guerra Targaryen, bastidores, trailer ou expectativas para a terceira temporada.";
+  }
+  return "Assunto recente de cultura pop com potencial para virar pauta, corte ou video rapido no Janela Pop.";
+}
+
+function buildVideoIdea(item, title) {
+  const text = `${item.title} ${item.description}`.toLowerCase();
+  if (/trailer|teaser|promo/.test(text)) return "trailer sempre tem imediatismo; da para explicar cena por cena, levantar pistas e comparar com teorias que o publico ja acompanha.";
+  if (/theory|teoria|explained|ending|finale/.test(text)) return "teoria gera debate nos comentarios e pode virar video com pergunta forte, especialmente se conectar pistas antigas com novidade recente.";
+  if (/release date|confirmed|official|cast|filming|production/.test(text)) return "noticia confirmada ajuda a pegar busca do Google/YouTube e posicionar o canal rapido antes dos concorrentes brasileiros.";
+  if (item.series === "FROM") return "FROM e prioridade do canal; qualquer detalhe recente pode virar video curto com misterio, gancho e chamada para debate.";
+  return "o assunto esta fresco e pode ser adaptado para o publico brasileiro com contexto rapido e opiniao do Janela Pop.";
+}
+
+function buildHook(item, title) {
+  if (item.series === "FROM") return `FROM acabou de ganhar uma pista que pode mudar a leitura da serie: ${title}`;
+  if (item.series === "Silo temporada 3") return `Silo voltou ao radar e essa novidade pode revelar o caminho da temporada 3: ${title}`;
+  if (item.series === "A Casa do Dragao temporada 3") return `A guerra em Westeros pode estar ficando mais clara depois dessa novidade: ${title}`;
+  return `Essa novidade esta ganhando forca la fora e pode chegar forte no Brasil: ${title}`;
+}
+
+async function sendTelegram(text, image) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) {
@@ -301,10 +380,15 @@ async function sendTelegram(text) {
     return;
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const method = image ? "sendPhoto" : "sendMessage";
+  const body = image
+    ? { chat_id: chatId, photo: image, caption: text.slice(0, 1024) }
+    : { chat_id: chatId, text, disable_web_page_preview: false };
+
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: false }),
+    body: JSON.stringify(body),
   });
   const result = await response.json();
   if (!response.ok || !result.ok) {
@@ -345,7 +429,7 @@ async function main() {
   for (const item of candidates) {
     const alert = buildAlert(item);
     console.log(alert);
-    await sendTelegram(alert);
+    await sendTelegram(alert, item.image || fallbackImage(item.series));
     state.seen[item.id] = {
       title: item.title,
       link: item.link,
