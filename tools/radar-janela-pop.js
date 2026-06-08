@@ -448,6 +448,18 @@ function buildHook(item, title) {
   return `Essa novidade esta ganhando forca la fora e pode chegar forte no Brasil: ${title}`;
 }
 
+function uniqueByEditorialTheme(items) {
+  const seen = new Set();
+  const unique = [];
+  for (const item of items) {
+    const key = `${item.series}:${buildPtTitle(item, item.title)}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique;
+}
+
 async function sendTelegram(text, image) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -493,17 +505,18 @@ async function main() {
     .filter(isRelevant)
     .filter(isRecent)
     .filter((item) => !state.seen[item.id])
-    .sort((a, b) => b.priorityScore - a.priorityScore)
-    .slice(0, 3);
+    .sort((a, b) => b.priorityScore - a.priorityScore);
 
-  if (!candidates.length) {
+  const candidatesToSend = uniqueByEditorialTheme(candidates).slice(0, 3);
+
+  if (!candidatesToSend.length) {
     console.log("Radar Janela Pop: nenhuma novidade forte encontrada agora.");
     if (errors.length) console.log(`Avisos: ${errors.join(" | ")}`);
     saveState(state);
     return;
   }
 
-  for (const item of candidates) {
+  for (const item of candidatesToSend) {
     const alert = buildAlert(item);
     console.log(alert);
     await sendTelegram(alert, item.image || fallbackImage(item.series));
